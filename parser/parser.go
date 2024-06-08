@@ -49,6 +49,11 @@ func New(lexer *lexer.Lexer) *Parser {
 	parser.registerPrefix(token.INT, parser.parseIntegerLiteral)
 	parser.registerPrefix(token.BANG, parser.parsePrefixExpression)
 	parser.registerPrefix(token.MINUS, parser.parsePrefixExpression)
+	parser.registerPrefix(token.TRUE, parser.parseBoolean)
+	parser.registerPrefix(token.FALSE, parser.parseBoolean)
+	parser.registerPrefix(token.OPEN_PARENTHESIS, parser.parseGroupExpressions)
+	parser.registerPrefix(token.IF, parser.parseIfExpression)
+	parser.registerPrefix(token.FUNCTION, parser.parseFunctionLiteral)
 
 	parser.infixParseFns = make(map[token.TokenType]infixParseFn)
 	parser.registerInfix(token.PLUS, parser.parseInfixExpression)
@@ -205,6 +210,119 @@ func (parser *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	expression.Right = parser.parseExpression(precedence)
 
 	return expression
+}
+
+func (parser *Parser) parseBoolean() ast.Expression {
+	return &ast.Boolean{Token: parser.currentToken, Value: parser.currentTokenIs(token.TRUE)}
+}
+
+func (parser *Parser) parseGroupExpressions() ast.Expression {
+	parser.nextToken()
+
+	expression := parser.parseExpression(LOWEST)
+
+	if !parser.expectPeek(token.CLOSE_PARENTHESIS) {
+		return nil
+	}
+
+	return expression
+}
+
+func (parser *Parser) parseIfExpression() ast.Expression {
+	expression := &ast.IfExpression{Token: parser.currentToken}
+
+	if !parser.expectPeek(token.OPEN_PARENTHESIS) {
+		return nil
+	}
+
+	parser.nextToken()
+	expression.Condition = parser.parseExpression(LOWEST)
+
+	if !parser.expectPeek(token.CLOSE_PARENTHESIS) {
+		return nil
+	}
+
+	if !parser.expectPeek(token.OPEN_CURLY) {
+		return nil
+	}
+
+	expression.Consequence = parser.parseBlockStatement()
+
+	if parser.peekTokenIs(token.ELSE) {
+		parser.nextToken()
+
+		if !parser.expectPeek(token.OPEN_CURLY) {
+			return nil
+		}
+
+		expression.Alternative = parser.parseBlockStatement()
+	}
+	return expression
+}
+
+func (parser *Parser) parseBlockStatement() *ast.BlockStatement {
+	block := &ast.BlockStatement{Token: parser.currentToken}
+	block.Statements = []ast.Statement{}
+
+	parser.nextToken()
+
+	for !parser.currentTokenIs(token.CLOSE_CURLY) && !parser.currentTokenIs(token.EOF) {
+
+		statement := parser.parseStatement()
+		if statement != nil {
+			block.Statements = append(block.Statements, statement)
+		}
+
+		parser.nextToken()
+	}
+
+	return block
+}
+
+func (parser *Parser) parseFunctionLiteral() ast.Expression {
+	literal := &ast.FunctionLiteral{Token: parser.currentToken}
+
+	if !parser.expectPeek(token.OPEN_PARENTHESIS) {
+		return nil
+	}
+
+	literal.Parameters = parser.parseFunctionParameters()
+
+	if !parser.expectPeek(token.OPEN_CURLY) {
+		return nil
+	}
+
+	literal.Body = parser.parseBlockStatement()
+
+	return literal
+}
+
+func (parser *Parser) parseFunctionParameters() []*ast.Identifier {
+	identifiers := []*ast.Identifier{}
+
+	if parser.peekTokenIs(token.CLOSE_PARENTHESIS) {
+		parser.nextToken()
+		return identifiers
+	}
+
+	parser.nextToken()
+
+	ident := &ast.Identifier{Token: parser.currentToken, Value: parser.currentToken.Literal}
+	identifiers = append(identifiers, ident)
+
+	for parser.peekTokenIs(token.COMMA) {
+		parser.nextToken()
+		parser.nextToken()
+
+		ident := &ast.Identifier{Token: parser.currentToken, Value: parser.currentToken.Literal}
+		identifiers = append(identifiers, ident)
+	}
+
+	if !parser.expectPeek(token.CLOSE_PARENTHESIS) {
+		return nil
+	}
+
+	return identifiers
 }
 
 type (
